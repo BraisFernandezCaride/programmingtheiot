@@ -278,11 +278,91 @@ class CoapClientConnector(IRequestResponseClient):
 	def setDataMessageListener(self, listener: IDataMessageListener = None) -> bool:
 		pass
 
-	def startObserver(self, resource: ResourceNameEnum = None, name: str = None, ttl: int = IRequestResponseClient.DEFAULT_TTL) -> bool:
-		pass
+	def startObserver(
+		self,
+		resource: ResourceNameEnum = None,
+		name: str = None,
+		ttl: int = IRequestResponseClient.DEFAULT_TTL
+	) -> bool:
+		if resource or name:
+			resourcePath = self._createResourcePath(resource, name)
 
-	def stopObserver(self, resource: ResourceNameEnum = None, name: str = None, timeout: int = IRequestResponseClient.DEFAULT_TIMEOUT) -> bool:
-		pass
+			if resourcePath in self.observeRequests:
+				logging.warning("Already observing resource %s. Ignoring start observe request.", resourcePath)
+				return False
+
+			asyncio.get_event_loop().run_until_complete(
+				asyncio.ensure_future(self._handleStartObserveRequest(resourcePath))
+			)
+			return True
+		else:
+			logging.warning("Can't issue Async OBSERVE - GET - no path or path list provided.")
+			return False
+
+	def stopObserver(
+		self,
+		resource: ResourceNameEnum = None,
+		name: str = None
+		) -> bool:
+		if resource or name:
+			resourcePath = self._createResourcePath(resource, name)
+
+			if resourcePath not in self.observeRequests:
+				logging.warning("Resource %s not being observed. Ignoring stop observe request.", resourcePath)
+				return False
+
+			asyncio.get_event_loop().run_until_complete(
+				self._handleStopObserveRequest(resourcePath)
+			)
+			return True
+		else:
+			logging.warning("Can't cancel OBSERVE - GET - no path provided.")
+			return False
+		
+	async def _handleStartObserveRequest(self, resourcePath: str = None):
+		logging.info('Handle start observe invoked. Waiting for each input: ' + str(resourcePath))
+
+		msg = Message(code=Code.GET, uri=resourcePath, observe=0)
+		req = self.coapClient.request(msg)
+
+		self.observeRequests[resourcePath] = req
+
+		try:
+			responseData = await req.response
+
+			# TODO: validate response first
+			self._onGetResponse(responseData)
+
+			async for responseData in req.observation:
+				# TODO: validate response first
+				self._onGetResponse(responseData)
+
+				req.observation.cancel()
+				break
+
+		except Exception as e:
+			# TODO: log warning and possibly stack trace, then be sure to stop observing...
+			logging.warning("Failed to execute OBSERVE - GET. Recovering...")
+			traceback.print_exception(type(e), e, e.__traceback__)
+
+	async def _handleStopObserveRequest(self, resourcePath: str = None, ignoreErr: bool = False):
+		if resourcePath in self.observeRequests:
+			logging.info('Handle stop observe invoked: ' + resourcePath)
+
+			try:
+				observeRequest = self.observeRequests[resourcePath]
+				observeRequest.observation.cancel()
+			except Exception as e:
+				if not ignoreErr:
+					logging.warning("Failed to cancel OBSERVE - GET: " + resourcePath)
+
+			try:
+				del self.observeRequests[resourcePath]
+			except Exception as e:
+				if not ignoreErr:
+					logging.warning("Failed to remove observable from list: " + resourcePath)
+		else:
+			logging.warning('Resource not currently under observation. Ignoring: ' + resourcePath)
 
 	def _initClient(self):
 		asyncio.get_event_loop().run_until_complete(self._initClientContext())
