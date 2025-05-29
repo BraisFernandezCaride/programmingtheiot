@@ -25,6 +25,8 @@ from programmingtheiot.cda.sim.HumiditySensorSimTask import HumiditySensorSimTas
 from programmingtheiot.cda.sim.TemperatureSensorSimTask import TemperatureSensorSimTask
 from programmingtheiot.cda.sim.PressureSensorSimTask import PressureSensorSimTask
 
+from programmingtheiot.cda.sim.SmokeSensorSimTask import SmokeSensorSimTask
+
 
 class SensorAdapterManager(object):
 	"""
@@ -67,10 +69,17 @@ class SensorAdapterManager(object):
 			tempData     = \
 				self.dataGenerator.generateDailyIndoorTemperatureDataSet( \
 					minValue = tempFloor, maxValue = tempCeiling, useSeconds = False)
+			
+			smokeData    =  \
+				self.dataGenerator.generateDailySmokeLevelDataSet(
+					minValue = 0.0, maxValue = 100.0, useSeconds = False)
+			
+			
 
 			self.humidityAdapter = HumiditySensorSimTask(dataSet = humidityData)
 			self.pressureAdapter = PressureSensorSimTask(dataSet = pressureData)
 			self.tempAdapter     = TemperatureSensorSimTask(dataSet = tempData)
+			self.smokeAdapter = SmokeSensorSimTask(dataSet = smokeData)
 
 		else:
 			heModule = import_module('programmingtheiot.cda.emulated.HumiditySensorEmulatorTask', 'HumiditySensorEmulatorTask')
@@ -84,6 +93,10 @@ class SensorAdapterManager(object):
 			teModule = import_module('programmingtheiot.cda.emulated.TemperatureSensorEmulatorTask', 'TemperatureSensorEmulatorTask')
 			teClazz = getattr(teModule, 'TemperatureSensorEmulatorTask')
 			self.tempAdapter = teClazz()
+
+			seModule = import_module('programmingtheiot.cda.emulated.SmokeSensorEmulatorTask', 'SmokeSensorEmulatorTask')
+			seClazz = getattr(seModule, 'SmokeSensorEmulatorTask')
+			self.smokeAdapter = seClazz()
 
 	def _initEnvironmentalSensorTasks(self):
 		humidityFloor   = \
@@ -141,23 +154,28 @@ class SensorAdapterManager(object):
 		humidityData = self.humidityAdapter.generateTelemetry()
 		pressureData = self.pressureAdapter.generateTelemetry()
 		tempData     = self.tempAdapter.generateTelemetry()
+		smokeData = self.smokeAdapter.generateTelemetry()
 
 		humidityData.setLocationID(self.locationID)
 		pressureData.setLocationID(self.locationID)
 		tempData.setLocationID(self.locationID)
+		smokeData.setLocationID(self.locationID)
 
 		logging.debug('Generated humidity data: ' + str(humidityData))
 		logging.debug('Generated pressure data: ' + str(pressureData))
 		logging.debug('Generated temp data: ' + str(tempData))
+		logging.debug('Generated smoke data: ' + str(smokeData))
 
 		if self.dataMsgListener:
 			self.dataMsgListener.handleSensorMessage(humidityData)
 			self.dataMsgListener.handleSensorMessage(pressureData)
 			self.dataMsgListener.handleSensorMessage(tempData)
+			self.dataMsgListener.handleSensorMessage(smokeData)
 		
 	def setDataMessageListener(self, listener: IDataMessageListener):
 		if listener:
 			self.dataMsgListener = listener
+			
 
 	def startManager(self) -> bool:
 		logging.info("Started SensorAdapterManager.")
@@ -178,3 +196,17 @@ class SensorAdapterManager(object):
 		except:
 			logging.info("SensorAdapterManager scheduler already stopped. Ignoring.")
 		return False
+
+def __init__(self, useEmulator: bool = False):
+	self.useEmulator = useEmulator
+	self.scheduler = BackgroundScheduler()
+	self.configUtil = ConfigUtil()
+	self.locationID = 1
+	self.dataMsgListener = None
+
+	self.humidityAdapter = None
+	self.pressureAdapter = None
+	self.tempAdapter = None
+	self.smokeAdapter = None  
+
+	self._initEnvironmentalSensorTasks()
